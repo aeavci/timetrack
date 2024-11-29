@@ -1,0 +1,228 @@
+{% extends 'base.html' %} {% block title %}Employee Dashboard{% endblock %} {%
+block content %}
+<div class="row">
+  <div class="col-md-4">
+    <div class="card">
+      <div class="card-body">
+        <h5 class="card-title">Today's Status</h5>
+        <p>Entry Time: <span id="entryTime">--:--</span></p>
+        <p>Exit Time: <span id="exitTime">--:--</span></p>
+        <button id="checkInBtn" class="btn btn-primary">Check In</button>
+        <button id="checkOutBtn" class="btn btn-danger" disabled>
+          Check Out
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-8">
+    <div class="card">
+      <div class="card-body">
+        <h5 class="card-title">Leave Balance</h5>
+        <p>Remaining Days: <span id="leaveBalance">Loading...</span></p>
+        <button
+          class="btn btn-primary"
+          data-bs-toggle="modal"
+          data-bs-target="#leaveRequestModal"
+        >
+          Request Leave
+        </button>
+      </div>
+    </div>
+
+    <div class="card mt-4">
+      <div class="card-body">
+        <h5 class="card-title">Leave History</h5>
+        <table id="leaveHistoryTable" class="table">
+          <thead>
+            <tr>
+              <th>Start Date</th>
+              <th>End Date</th>
+              <th>Status</th>
+              <th>Reason</th>
+            </tr>
+          </thead>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+<!-- Leave Request Modal -->
+<div class="modal fade" id="leaveRequestModal">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Request Leave</h5>
+        <button
+          type="button"
+          class="btn-close"
+          data-bs-dismiss="modal"
+        ></button>
+      </div>
+      <div class="modal-body">
+        <form id="leaveRequestForm">
+          <div class="mb-3">
+            <label class="form-label">Start Date</label>
+            <input type="date" class="form-control" name="startDate" required />
+          </div>
+          <div class="mb-3">
+            <label class="form-label">End Date</label>
+            <input type="date" class="form-control" name="endDate" required />
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Reason</label>
+            <textarea class="form-control" name="reason" required></textarea>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+          Close
+        </button>
+        <button type="button" class="btn btn-primary" id="submitLeaveRequest">
+          Submit
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %} {% block scripts %}
+<script>
+  // WebSocket Connection
+  const socket = new WebSocket(
+    "ws://" + window.location.host + "/ws/notifications/"
+  );
+
+  socket.onmessage = function (e) {
+    const data = JSON.parse(e.data);
+    showNotification(data.message);
+  };
+
+  function showNotification(message) {
+    const notification = document.getElementById("notification");
+    notification.textContent = message;
+    notification.style.display = "block";
+    setTimeout(() => {
+      notification.style.display = "none";
+    }, 5000);
+  }
+
+  // Check In/Out Functionality
+  document.getElementById("checkInBtn").addEventListener("click", async () => {
+    try {
+      const response = await fetch("/api/timerecord/checkin/", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRFToken": getCookie("csrftoken"),
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        document.getElementById("entryTime").textContent = data.entry_time;
+        document.getElementById("checkInBtn").disabled = true;
+        document.getElementById("checkOutBtn").disabled = false;
+      }
+    } catch (error) {
+      console.error("Error:", error);
+    }
+  });
+
+  document.getElementById("checkOutBtn").addEventListener("click", async () => {
+    try {
+      const response = await fetch("/api/timerecord/checkout/", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRFToken": getCookie("csrftoken"),
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        document.getElementById("exitTime").textContent = data.exit_time;
+        document.getElementById("checkOutBtn").disabled = true;
+      }
+    } catch (error) {
+      console.error("Error:", error);
+    }
+  });
+
+  // Leave History DataTable
+  const leaveHistoryTable = $("#leaveHistoryTable").DataTable({
+    serverSide: true,
+    ajax: {
+      url: "/api/leave/history/",
+      type: "GET",
+      dataSrc: "data",
+    },
+    columns: [
+      { data: "start_date" },
+      { data: "end_date" },
+      { data: "status" },
+      { data: "reason" },
+    ],
+    order: [[0, "desc"]],
+  });
+
+  // Leave Request Form Submission
+  document
+    .getElementById("submitLeaveRequest")
+    .addEventListener("click", async () => {
+      const form = document.getElementById("leaveRequestForm");
+      const formData = new FormData(form);
+
+      try {
+        const response = await fetch("/api/leave/request/", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-CSRFToken": getCookie("csrftoken"),
+          },
+          body: JSON.stringify(Object.fromEntries(formData)),
+        });
+
+        if (response.ok) {
+          $("#leaveRequestModal").modal("hide");
+          leaveHistoryTable.ajax.reload();
+          form.reset();
+          showNotification("Leave request submitted successfully");
+        }
+      } catch (error) {
+        console.error("Error:", error);
+      }
+    });
+
+  // Utility function to get CSRF token
+  function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== "") {
+      const cookies = document.cookie.split(";");
+      for (let i = 0; i < cookies.length; i++) {
+        const cookie = cookies[i].trim();
+        if (cookie.substring(0, name.length + 1) === name + "=") {
+          cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+          break;
+        }
+      }
+    }
+    return cookieValue;
+  }
+
+  // Initial load of leave balance
+  async function loadLeaveBalance() {
+    try {
+      const response = await fetch("/api/employee/leave-balance/");
+      if (response.ok) {
+        const data = await response.json();
+        document.getElementById("leaveBalance").textContent = data.balance;
+      }
+    } catch (error) {
+      console.error("Error:", error);
+    }
+  }
+
+  loadLeaveBalance();
+</script>
+{% endblock %}
